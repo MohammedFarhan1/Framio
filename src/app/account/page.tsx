@@ -1,0 +1,649 @@
+'use client';
+
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import {
+  LayoutDashboard, Package, Heart, MapPin, User, Settings,
+  HelpCircle, LogOut, ChevronRight, Loader2, Save, Plus,
+  MessageCircle, Mail, Phone, Shield, Bell, Lock,
+  ArrowRight, Star, Trash2, Edit3,
+} from 'lucide-react';
+
+const AdminIcon = LayoutDashboard;
+import { createClient } from '@/lib/supabase/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { formatPrice, getOrderStatusLabel } from '@/lib/utils';
+import { toast } from 'sonner';
+
+const ADMIN_EMAIL = 'admin@framio.shop';
+
+type Section = 'dashboard' | 'orders' | 'wishlist' | 'addresses' | 'profile' | 'settings' | 'help';
+
+interface Profile  { name: string; phone: string; email: string; }
+interface Order     { id: string; status: string; total: number; created_at: string; item_count?: number; }
+interface Address   { id: string; label: string; line1: string; line2?: string; city: string; state: string; pincode: string; phone: string; isDefault: boolean; }
+
+const NAV = [
+  { id: 'dashboard' as Section, label: 'Dashboard',       icon: LayoutDashboard },
+  { id: 'orders'    as Section, label: 'My Orders',        icon: Package },
+  { id: 'wishlist'  as Section, label: 'Wishlist',          icon: Heart },
+  { id: 'addresses' as Section, label: 'Saved Addresses',  icon: MapPin },
+  { id: 'profile'   as Section, label: 'Profile',           icon: User },
+  { id: 'settings'  as Section, label: 'Account Settings', icon: Settings },
+  { id: 'help'      as Section, label: 'Help & Support',   icon: HelpCircle },
+];
+
+const STATUS_COLOR: Record<string, string> = {
+  processing: 'bg-amber-50 text-amber-700 border-amber-200',
+  shipped:    'bg-blue-50 text-blue-700 border-blue-200',
+  delivered:  'bg-emerald-50 text-emerald-700 border-emerald-200',
+  cancelled:  'bg-red-50 text-red-700 border-red-200',
+};
+
+export default function AccountPage() {
+  const router   = useRouter();
+  const supabase = createClient();
+
+  const [section, setSection] = useState<Section>('dashboard');
+  const [loading, setLoading] = useState(true);
+  const [saving,  setSaving]  = useState(false);
+
+  const [authUser, setAuthUser] = useState<{ id: string; email?: string } | null>(null);
+  const [profile,  setProfile]  = useState<Profile>({ name: '', phone: '', email: '' });
+  const [orders,   setOrders]   = useState<Order[]>([]);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+
+  /* address form state */
+  const [showAddressForm, setShowAddressForm] = useState(false);
+  const [editingAddress,  setEditingAddress]  = useState<Address | null>(null);
+  const [addrForm, setAddrForm] = useState<Omit<Address, 'id' | 'isDefault'>>({
+    label: 'Home', line1: '', line2: '', city: '', state: 'Maharashtra', pincode: '', phone: '',
+  });
+
+  useEffect(() => {
+    async function load() {
+      const { data: { user: u } } = await supabase.auth.getUser();
+      if (!u) { router.replace('/auth/login?redirect=/account'); return; }
+      setAuthUser({ id: u.id, email: u.email });
+
+      const [{ data: p }, { data: o }, { data: addr }] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', u.id).single(),
+        supabase.from('orders').select('id, status, total, created_at').eq('user_id', u.id).order('created_at', { ascending: false }).limit(20),
+        supabase.from('addresses').select('*').eq('user_id', u.id).order('is_default', { ascending: false }),
+      ]);
+
+      if (p) setProfile({ name: p.name || '', phone: p.phone || '', email: p.email || u.email || '' });
+      else   setProfile(prev => ({ ...prev, email: u.email || '' }));
+      setOrders(o || []);
+      setAddresses((addr || []).map((a: Record<string, unknown>) => ({
+        id:        a.id as string,
+        label:     (a.label as string)   || 'Home',
+        line1:     (a.line1 as string)   || '',
+        line2:     (a.line2 as string)   || '',
+        city:      (a.city as string)    || '',
+        state:     (a.state as string)   || '',
+        pincode:   (a.pincode as string) || '',
+        phone:     (a.phone as string)   || '',
+        isDefault: !!(a.is_default),
+      })));
+      setLoading(false);
+    }
+    load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const saveProfile = async () => {
+    if (!authUser) return;
+    setSaving(true);
+    const { error } = await supabase.from('profiles')
+      .upsert({ id: authUser.id, name: profile.name, phone: profile.phone, email: profile.email, updated_at: new Date().toISOString() });
+    setSaving(false);
+    if (error) toast.error('Failed to save profile');
+    else toast.success('Profile updated!');
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    router.replace('/');
+  };
+
+  const navigate = (s: Section) => {
+    setSection(s);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const saveAddress = async () => {
+    if (!authUser) return;
+    if (!addrForm.line1 || !addrForm.city || !addrForm.pincode || !addrForm.phone) {
+      toast.error('Please fill all required fields'); return;
+    }
+    const payload = { user_id: authUser.id, ...addrForm, is_default: addresses.length === 0 };
+    if (editingAddress) {
+      const { error } = await supabase.from('addresses').update(payload).eq('id', editingAddress.id);
+      if (error) { toast.error('Failed to update address'); return; }
+      setAddresses(prev => prev.map(a => a.id === editingAddress.id ? { ...a, ...addrForm, isDefault: payload.is_default } : a));
+    } else {
+      const { data, error } = await supabase.from('addresses').insert(payload).select('id').single();
+      if (error || !data) { toast.error('Failed to save address'); return; }
+      setAddresses(prev => [...prev, { id: data.id, ...addrForm, isDefault: payload.is_default }]);
+    }
+    toast.success(editingAddress ? 'Address updated!' : 'Address saved!');
+    setShowAddressForm(false);
+    setEditingAddress(null);
+    setAddrForm({ label: 'Home', line1: '', line2: '', city: '', state: 'Maharashtra', pincode: '', phone: '' });
+  };
+
+  const deleteAddress = async (id: string) => {
+    await supabase.from('addresses').delete().eq('id', id);
+    setAddresses(prev => prev.filter(a => a.id !== id));
+    toast.success('Address removed');
+  };
+
+  /* ── Loading ──────────────────────────────────────────────────── */
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 size={32} className="animate-spin text-[#C4634F]" />
+      </div>
+    );
+  }
+
+  const initials = profile.name
+    ? profile.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+    : (authUser?.email?.[0] || 'U').toUpperCase();
+
+  /* ── Section renderers ───────────────────────────────────────── */
+  const delivered  = orders.filter(o => o.status === 'delivered').length;
+  const processing = orders.filter(o => ['processing', 'shipped'].includes(o.status)).length;
+
+  const sections: Record<Section, React.ReactNode> = {
+
+    /* Dashboard */
+    dashboard: (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-xl font-bold text-[#2D1F1A]">Welcome back{profile.name ? `, ${profile.name.split(' ')[0]}` : ''}!</h2>
+          <p className="text-sm text-[#7A6A64] mt-0.5">Here's a snapshot of your account.</p>
+        </div>
+
+        {/* Admin shortcut */}
+        {authUser?.email === ADMIN_EMAIL && (
+          <Link href="/admin" className="flex items-center gap-3 p-4 bg-[#2D1F1A] rounded-2xl hover:bg-[#3d2b24] transition-all group">
+            <div className="w-10 h-10 bg-[#C4634F] rounded-xl flex items-center justify-center flex-shrink-0">
+              <AdminIcon size={18} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-white text-sm">Admin Dashboard</p>
+              <p className="text-white/50 text-xs">Manage orders, products & more</p>
+            </div>
+            <ChevronRight size={16} className="text-white/40 group-hover:text-white/70 transition-colors" />
+          </Link>
+        )}
+
+        {/* Stats */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          {[
+            { label: 'Total Orders',    value: orders.length,    icon: <Package size={18} />,  color: 'text-[#C4634F]', bg: 'bg-[#C4634F]/10', action: () => navigate('orders') },
+            { label: 'Delivered',       value: delivered,         icon: <Star size={18} />,     color: 'text-emerald-600', bg: 'bg-emerald-50',  action: () => navigate('orders') },
+            { label: 'Saved Addresses', value: addresses.length,  icon: <MapPin size={18} />,   color: 'text-[#C9A84C]',  bg: 'bg-[#C9A84C]/10', action: () => navigate('addresses') },
+          ].map(s => (
+            <button key={s.label} onClick={s.action}
+              className="bg-white rounded-2xl border border-[#E8DDD6] p-5 text-left hover:border-[#C4634F]/40 hover:shadow-sm transition-all">
+              <div className={`w-9 h-9 rounded-xl ${s.bg} flex items-center justify-center mb-3 ${s.color}`}>{s.icon}</div>
+              <p className="text-2xl font-bold text-[#2D1F1A]">{s.value}</p>
+              <p className="text-xs text-[#7A6A64] mt-0.5">{s.label}</p>
+            </button>
+          ))}
+        </div>
+
+        {/* Recent orders */}
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-[#E8DDD6]">
+            <h3 className="font-bold text-[#2D1F1A] text-sm">Recent Orders</h3>
+            {orders.length > 0 && (
+              <button onClick={() => navigate('orders')} className="text-xs text-[#C4634F] font-semibold hover:underline flex items-center gap-1">
+                View all <ArrowRight size={12} />
+              </button>
+            )}
+          </div>
+          {orders.length === 0 ? (
+            <div className="py-10 text-center">
+              <Package size={32} className="mx-auto mb-3 text-[#E8DDD6]" />
+              <p className="text-sm text-[#7A6A64] mb-4">No orders yet</p>
+              <Button asChild size="sm"><Link href="/products">Shop Now</Link></Button>
+            </div>
+          ) : (
+            <div>
+              {orders.slice(0, 4).map(o => (
+                <Link key={o.id} href={`/orders/${o.id}`}
+                  className="flex items-center justify-between px-5 py-3.5 border-b border-[#E8DDD6] last:border-0 hover:bg-[#FDF8F4] transition-colors group">
+                  <div>
+                    <p className="text-xs font-mono text-[#7A6A64]">#{o.id.slice(0, 8).toUpperCase()}</p>
+                    <p className="font-semibold text-[#2D1F1A] text-sm">{formatPrice(o.total)}</p>
+                    <p className="text-xs text-[#7A6A64]">{new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${STATUS_COLOR[o.status] || 'bg-[#F5EDE5] text-[#7A6A64] border-[#E8DDD6]'}`}>
+                      {getOrderStatusLabel(o.status)}
+                    </span>
+                    <ChevronRight size={15} className="text-[#E8DDD6] group-hover:text-[#C4634F] transition-colors" />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Quick actions */}
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            { label: 'Browse Frames', href: '/products', icon: <ArrowRight size={14} /> },
+            { label: 'Track an Order', action: () => navigate('orders'), icon: <Package size={14} /> },
+          ].map(a => (
+            a.href ? (
+              <Link key={a.label} href={a.href}
+                className="flex items-center justify-between p-4 bg-white rounded-xl border border-[#E8DDD6] hover:border-[#C4634F]/40 hover:shadow-sm transition-all text-sm font-medium text-[#2D1F1A]">
+                {a.label} <span className="text-[#C4634F]">{a.icon}</span>
+              </Link>
+            ) : (
+              <button key={a.label} onClick={a.action}
+                className="flex items-center justify-between p-4 bg-white rounded-xl border border-[#E8DDD6] hover:border-[#C4634F]/40 hover:shadow-sm transition-all text-sm font-medium text-[#2D1F1A]">
+                {a.label} <span className="text-[#C4634F]">{a.icon}</span>
+              </button>
+            )
+          ))}
+        </div>
+      </div>
+    ),
+
+    /* My Orders */
+    orders: (
+      <div className="space-y-4">
+        <h2 className="text-xl font-bold text-[#2D1F1A]">My Orders</h2>
+        {orders.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-[#E8DDD6] py-16 text-center">
+            <Package size={48} className="mx-auto mb-4 text-[#E8DDD6]" />
+            <p className="font-semibold text-[#2D1F1A] mb-1">No orders yet</p>
+            <p className="text-sm text-[#7A6A64] mb-6">Your orders will appear here once you shop</p>
+            <Button asChild><Link href="/products">Shop All Frames</Link></Button>
+          </div>
+        ) : (
+          orders.map(o => (
+            <Link key={o.id} href={`/orders/${o.id}`}
+              className="flex items-center justify-between bg-white rounded-2xl border border-[#E8DDD6] px-5 py-4 hover:border-[#C4634F]/50 hover:shadow-sm transition-all group">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-xl bg-[#F5EDE5] flex items-center justify-center flex-shrink-0">
+                  <Package size={18} className="text-[#C4634F]" />
+                </div>
+                <div>
+                  <p className="font-semibold text-[#2D1F1A] text-sm">Order #{o.id.slice(0, 8).toUpperCase()}</p>
+                  <p className="text-xs text-[#7A6A64] mt-0.5">
+                    {new Date(o.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                    {' · '}{formatPrice(o.total)}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className={`text-xs font-medium px-2.5 py-1 rounded-full border hidden sm:block ${STATUS_COLOR[o.status] || 'bg-[#F5EDE5] text-[#7A6A64] border-[#E8DDD6]'}`}>
+                  {getOrderStatusLabel(o.status)}
+                </span>
+                <ChevronRight size={16} className="text-[#E8DDD6] group-hover:text-[#C4634F] transition-colors" />
+              </div>
+            </Link>
+          ))
+        )}
+      </div>
+    ),
+
+    /* Wishlist */
+    wishlist: (
+      <div>
+        <h2 className="text-xl font-bold text-[#2D1F1A] mb-6">Wishlist</h2>
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] py-16 text-center">
+          <Heart size={48} className="mx-auto mb-4 text-[#E8DDD6]" />
+          <p className="font-semibold text-[#2D1F1A] mb-1">Your wishlist is empty</p>
+          <p className="text-sm text-[#7A6A64] mb-6">
+            Tap the <Heart size={13} className="inline text-[#C4634F] fill-[#C4634F]" /> on any frame to save it here
+          </p>
+          <Button asChild><Link href="/products">Browse Frames</Link></Button>
+        </div>
+      </div>
+    ),
+
+    /* Saved Addresses */
+    addresses: (
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-[#2D1F1A]">Saved Addresses</h2>
+          {!showAddressForm && (
+            <Button size="sm" onClick={() => { setEditingAddress(null); setAddrForm({ label: 'Home', line1: '', line2: '', city: '', state: 'Maharashtra', pincode: '', phone: '' }); setShowAddressForm(true); }}>
+              <Plus size={14} /> Add New
+            </Button>
+          )}
+        </div>
+
+        {showAddressForm && (
+          <div className="bg-white rounded-2xl border border-[#E8DDD6] p-6">
+            <h3 className="font-bold text-[#2D1F1A] mb-5">{editingAddress ? 'Edit Address' : 'New Address'}</h3>
+            <div className="space-y-4">
+              {/* Label */}
+              <div className="flex gap-2">
+                {['Home', 'Work', 'Other'].map(l => (
+                  <button key={l} onClick={() => setAddrForm(f => ({ ...f, label: l }))}
+                    className={`px-4 py-1.5 rounded-xl text-sm font-medium border-2 transition-all ${addrForm.label === l ? 'border-[#C4634F] bg-[#C4634F] text-white' : 'border-[#E8DDD6] text-[#7A6A64] hover:border-[#C4634F]/50'}`}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Input label="Phone *" placeholder="9876543210" type="tel" maxLength={10}
+                  value={addrForm.phone} onChange={e => setAddrForm(f => ({ ...f, phone: e.target.value }))} className="sm:col-span-2" />
+                <Input label="Address Line 1 *" placeholder="Flat / House No., Street"
+                  value={addrForm.line1} onChange={e => setAddrForm(f => ({ ...f, line1: e.target.value }))} className="sm:col-span-2" />
+                <Input label="Address Line 2" placeholder="Landmark, Area (optional)"
+                  value={addrForm.line2 || ''} onChange={e => setAddrForm(f => ({ ...f, line2: e.target.value }))} className="sm:col-span-2" />
+                <Input label="City *" placeholder="Mumbai"
+                  value={addrForm.city} onChange={e => setAddrForm(f => ({ ...f, city: e.target.value }))} />
+                <Input label="PIN Code *" placeholder="400001" type="tel" maxLength={6}
+                  value={addrForm.pincode} onChange={e => setAddrForm(f => ({ ...f, pincode: e.target.value }))} />
+              </div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <Button onClick={saveAddress}><Save size={14} /> Save Address</Button>
+              <Button variant="outline" onClick={() => { setShowAddressForm(false); setEditingAddress(null); }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {addresses.length === 0 && !showAddressForm ? (
+          <div className="bg-white rounded-2xl border border-[#E8DDD6] py-14 text-center">
+            <MapPin size={44} className="mx-auto mb-4 text-[#E8DDD6]" />
+            <p className="font-semibold text-[#2D1F1A] mb-1">No saved addresses</p>
+            <p className="text-sm text-[#7A6A64] mb-5">Add an address to speed up checkout</p>
+            <Button size="sm" onClick={() => setShowAddressForm(true)}><Plus size={14} /> Add Address</Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {addresses.map(a => (
+              <div key={a.id} className="bg-white rounded-2xl border border-[#E8DDD6] p-5">
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-lg bg-[#F5EDE5] text-[#C4634F]">{a.label}</span>
+                    {a.isDefault && <span className="text-xs font-medium text-emerald-600">Default</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { setEditingAddress(a); setAddrForm({ label: a.label, line1: a.line1, line2: a.line2, city: a.city, state: a.state, pincode: a.pincode, phone: a.phone }); setShowAddressForm(true); }}
+                      className="p-1.5 text-[#7A6A64] hover:text-[#C4634F] hover:bg-[#F5EDE5] rounded-lg transition-all">
+                      <Edit3 size={13} />
+                    </button>
+                    <button onClick={() => deleteAddress(a.id)}
+                      className="p-1.5 text-[#7A6A64] hover:text-red-500 hover:bg-red-50 rounded-lg transition-all">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-sm text-[#2D1F1A]">{a.line1}{a.line2 ? `, ${a.line2}` : ''}</p>
+                <p className="text-sm text-[#7A6A64]">{a.city}, {a.state} — {a.pincode}</p>
+                <p className="text-xs text-[#7A6A64] mt-1 flex items-center gap-1"><Phone size={11} /> {a.phone}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    ),
+
+    /* Profile */
+    profile: (
+      <div>
+        <h2 className="text-xl font-bold text-[#2D1F1A] mb-6">Profile</h2>
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] p-6">
+          <div className="flex items-center gap-4 mb-6 pb-6 border-b border-[#E8DDD6]">
+            <div className="w-16 h-16 rounded-2xl bg-[#C4634F] flex items-center justify-center text-white text-2xl font-bold flex-shrink-0">
+              {initials}
+            </div>
+            <div>
+              <p className="font-bold text-[#2D1F1A]">{profile.name || 'Set your name'}</p>
+              <p className="text-sm text-[#7A6A64]">{authUser?.email}</p>
+            </div>
+          </div>
+          <div className="space-y-4">
+            <Input label="Full Name" placeholder="Priya Sharma" value={profile.name}
+              onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} icon={<User size={15} />} />
+            <Input label="Email Address" placeholder="you@email.com" type="email" value={profile.email}
+              onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} />
+            <Input label="Phone Number" value={profile.phone} disabled
+              className="opacity-60 cursor-not-allowed" />
+            <p className="text-xs text-[#7A6A64]">Phone number cannot be changed. Contact support if needed.</p>
+          </div>
+          <Button onClick={saveProfile} disabled={saving} className="mt-6">
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+            Save Changes
+          </Button>
+        </div>
+      </div>
+    ),
+
+    /* Account Settings */
+    settings: (
+      <div className="space-y-5">
+        <h2 className="text-xl font-bold text-[#2D1F1A]">Account Settings</h2>
+
+        {/* Password */}
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-[#F5EDE5] flex items-center justify-center">
+                <Lock size={16} className="text-[#C4634F]" />
+              </div>
+              <div>
+                <p className="font-semibold text-[#2D1F1A] text-sm">Password</p>
+                <p className="text-xs text-[#7A6A64]">Change your account password</p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/auth/forgot-password">Change</Link>
+            </Button>
+          </div>
+        </div>
+
+        {/* Notifications */}
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-9 h-9 rounded-xl bg-[#F5EDE5] flex items-center justify-center">
+              <Bell size={16} className="text-[#C4634F]" />
+            </div>
+            <div>
+              <p className="font-semibold text-[#2D1F1A] text-sm">Notifications</p>
+              <p className="text-xs text-[#7A6A64]">Manage your notification preferences</p>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {[
+              { label: 'Order updates', desc: 'Status changes, dispatch & delivery alerts', checked: true },
+              { label: 'Promotions & offers', desc: 'Exclusive deals and seasonal sales', checked: false },
+              { label: 'New arrivals', desc: 'Be first to know about new frame collections', checked: false },
+            ].map(n => (
+              <label key={n.label} className="flex items-start gap-3 cursor-pointer">
+                <input type="checkbox" defaultChecked={n.checked} className="mt-0.5 accent-[#C4634F] w-4 h-4 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-[#2D1F1A]">{n.label}</p>
+                  <p className="text-xs text-[#7A6A64]">{n.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Privacy */}
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] p-5">
+          <div className="flex items-center gap-3 mb-1">
+            <div className="w-9 h-9 rounded-xl bg-[#F5EDE5] flex items-center justify-center">
+              <Shield size={16} className="text-[#C4634F]" />
+            </div>
+            <div>
+              <p className="font-semibold text-[#2D1F1A] text-sm">Privacy & Data</p>
+              <p className="text-xs text-[#7A6A64]">Manage your data and privacy settings</p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" asChild><Link href="#">Privacy Policy</Link></Button>
+            <Button variant="outline" size="sm" asChild><Link href="#">Terms of Service</Link></Button>
+          </div>
+        </div>
+
+        {/* Danger zone */}
+        <div className="bg-white rounded-2xl border border-red-100 p-5">
+          <p className="font-semibold text-red-600 text-sm mb-1">Danger Zone</p>
+          <p className="text-xs text-[#7A6A64] mb-4">Permanently delete your account and all associated data. This cannot be undone.</p>
+          <Button variant="outline" size="sm" className="border-red-200 text-red-500 hover:bg-red-50 hover:border-red-400">
+            Delete Account
+          </Button>
+        </div>
+      </div>
+    ),
+
+    /* Help & Support */
+    help: (
+      <div className="space-y-5">
+        <h2 className="text-xl font-bold text-[#2D1F1A]">Help & Support</h2>
+
+        <div className="grid sm:grid-cols-2 gap-4">
+          {[
+            { icon: <MessageCircle size={20} className="text-green-600" />, bg: 'bg-green-50', label: 'WhatsApp Chat', desc: 'Fastest — usually replies in under 30 min', href: 'https://wa.me/919876543210', cta: 'Chat Now' },
+            { icon: <Mail size={20} className="text-[#C4634F]" />,          bg: 'bg-[#F5EDE5]', label: 'Email Support', desc: 'Replies within 4–6 business hours',           href: 'mailto:hello@framio.shop', cta: 'Send Email' },
+          ].map(c => (
+            <a key={c.label} href={c.href} target="_blank" rel="noopener noreferrer"
+              className="bg-white rounded-2xl border border-[#E8DDD6] p-5 hover:border-[#C4634F]/40 hover:shadow-sm transition-all group">
+              <div className={`w-10 h-10 rounded-xl ${c.bg} flex items-center justify-center mb-3`}>{c.icon}</div>
+              <p className="font-semibold text-[#2D1F1A] text-sm mb-0.5">{c.label}</p>
+              <p className="text-xs text-[#7A6A64] mb-3">{c.desc}</p>
+              <span className="text-xs font-semibold text-[#C4634F] flex items-center gap-1 group-hover:underline">
+                {c.cta} <ArrowRight size={11} />
+              </span>
+            </a>
+          ))}
+        </div>
+
+        <div className="bg-white rounded-2xl border border-[#E8DDD6] overflow-hidden">
+          <div className="px-5 py-4 border-b border-[#E8DDD6]">
+            <p className="font-bold text-[#2D1F1A] text-sm">Quick Help</p>
+          </div>
+          {[
+            { q: 'How do I track my order?', href: '#' },
+            { q: 'What is your return & replacement policy?', href: '#' },
+            { q: 'How long does delivery take?', href: '#' },
+            { q: 'Can I change my order after placing it?', href: '#' },
+            { q: 'What image quality do I need?', href: '#' },
+          ].map(item => (
+            <Link key={item.q} href={item.href}
+              className="flex items-center justify-between px-5 py-3.5 border-b border-[#E8DDD6] last:border-0 hover:bg-[#FDF8F4] transition-colors group text-sm text-[#2D1F1A]">
+              {item.q}
+              <ChevronRight size={14} className="text-[#E8DDD6] group-hover:text-[#C4634F] flex-shrink-0 ml-2" />
+            </Link>
+          ))}
+        </div>
+
+        <div className="bg-[#F5EDE5] rounded-2xl p-5 flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-[#2D1F1A] text-sm">Support Hours</p>
+            <p className="text-xs text-[#7A6A64] mt-0.5">Mon–Sat · 9 AM – 8 PM IST</p>
+          </div>
+          <Link href="/contact" className="text-xs text-[#C4634F] font-semibold hover:underline flex items-center gap-1">
+            Contact Page <ArrowRight size={11} />
+          </Link>
+        </div>
+      </div>
+    ),
+  };
+
+  /* ── Render ──────────────────────────────────────────────────── */
+  return (
+    <div className="bg-[#FDF8F4] min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <div className="flex gap-8 items-start">
+
+          {/* ── Desktop Sidebar ────────────────────────────────── */}
+          <aside className="hidden lg:flex flex-col w-60 flex-shrink-0 sticky top-24">
+            {/* User card */}
+            <div className="bg-white rounded-2xl border border-[#E8DDD6] p-5 mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-xl bg-[#C4634F] flex items-center justify-center text-white text-lg font-bold flex-shrink-0">
+                  {initials}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-[#2D1F1A] text-sm truncate">{profile.name || 'My Account'}</p>
+                  <p className="text-xs text-[#7A6A64] truncate">{authUser?.email}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Nav */}
+            <nav className="bg-white rounded-2xl border border-[#E8DDD6] overflow-hidden mb-3">
+              {NAV.map(({ id, label, icon: Icon }, idx) => (
+                <button key={id} onClick={() => navigate(id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors ${idx < NAV.length - 1 ? 'border-b border-[#F5EDE5]' : ''} ${
+                    section === id
+                      ? 'bg-[#C4634F]/8 text-[#C4634F] font-semibold'
+                      : 'text-[#7A6A64] hover:bg-[#FDF8F4] hover:text-[#2D1F1A]'
+                  }`}>
+                  <Icon size={16} className={section === id ? 'text-[#C4634F]' : 'text-[#7A6A64]'} />
+                  {label}
+                  {section === id && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#C4634F]" />}
+                </button>
+              ))}
+            </nav>
+
+            {/* Logout */}
+            <button onClick={signOut}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-[#E8DDD6] text-sm text-[#7A6A64] hover:text-red-500 hover:border-red-200 hover:bg-red-50 transition-all">
+              <LogOut size={16} /> Sign Out
+            </button>
+          </aside>
+
+          {/* ── Main content ───────────────────────────────────── */}
+          <div className="flex-1 min-w-0">
+
+            {/* Mobile: user header */}
+            <div className="lg:hidden flex items-center gap-3 mb-5">
+              <div className="w-11 h-11 rounded-xl bg-[#C4634F] flex items-center justify-center text-white font-bold flex-shrink-0">
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-[#2D1F1A] text-sm truncate">{profile.name || 'My Account'}</p>
+                <p className="text-xs text-[#7A6A64] truncate">{authUser?.email}</p>
+              </div>
+              <button onClick={signOut} className="ml-auto p-2 text-[#7A6A64] hover:text-red-500 hover:bg-red-50 rounded-xl transition-all flex-shrink-0">
+                <LogOut size={16} />
+              </button>
+            </div>
+
+            {/* Mobile: horizontal scroll nav */}
+            <div className="lg:hidden -mx-4 px-4 mb-6">
+              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+                {NAV.map(({ id, label, icon: Icon }) => (
+                  <button key={id} onClick={() => navigate(id)}
+                    className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-medium flex-shrink-0 transition-all border ${
+                      section === id
+                        ? 'bg-[#C4634F] text-white border-[#C4634F] shadow-sm'
+                        : 'bg-white text-[#7A6A64] border-[#E8DDD6] hover:border-[#C4634F]/40'
+                    }`}>
+                    <Icon size={13} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Section content */}
+            {sections[section]}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

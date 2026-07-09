@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+:root {
+  --background: #FDF8F4;
+  --foreground: #2D1F1A;
+  --primary: #C4634F;
+  --primary-hover: #B05540;
+  --accent: #C9A84C;
+  --secondary: #F5EDE5;
+  --muted: #7A6A64;
+  --border: #E8DDD6;
+  --card: #FFFFFF;
+  --radius: 0.75rem;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+@theme inline {
+  --color-primary: #C4634F;
+  --color-primary-hover: #B05540;
+  --color-accent: #C9A84C;
+  --color-secondary: #F5EDE5;
+  --color-muted: #7A6A64;
+  --color-border: #E8DDD6;
+  --color-card: #FFFFFF;
+  --color-warm-white: #FDF8F4;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--secondary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+/* Canvas cursor for customizer */
+.canvas-container canvas {
+  cursor: crosshair;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #C4634F, #C9A84C);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+
+/* Smooth transitions */
+.transition-all {
+  transition: all 0.2s ease;
+}
