@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import Link from 'next/link';
-import { ArrowRight, Package, Shield, Star, Truck, Heart, Gift, Palette } from 'lucide-react';
+import { ArrowRight, Package, Shield, Star, Truck, Heart, Palette, Image as ImageIcon, Printer, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ProductCard } from '@/components/products/product-card';
 import { Product } from '@/types';
@@ -66,6 +66,39 @@ const TRUST_BADGES = [
   { icon: <Star size={20} />, title: 'Premium Quality', desc: 'Printed on archival-grade paper' },
   { icon: <Truck size={20} />, title: 'Fast Delivery', desc: '3–5 days across India' },
   { icon: <Heart size={20} />, title: 'Made with Love', desc: 'Handcrafted in India 🇮🇳' },
+];
+
+const WHY_FRAMIO = [
+  {
+    icon: <ImageIcon size={20} />,
+    title: 'Premium Wooden Frames',
+    desc: 'Solid wood frames in multiple finishes, built to last a lifetime.',
+  },
+  {
+    icon: <Printer size={20} />,
+    title: 'HD Archival Printing',
+    desc: 'Museum-grade ink on archival paper — colours that never fade.',
+  },
+  {
+    icon: <Heart size={20} />,
+    title: 'Personalized with Care',
+    desc: 'Every frame is made to order, crafted just for you and your moment.',
+  },
+  {
+    icon: <Package size={20} />,
+    title: 'Secure Packaging',
+    desc: 'Triple-layer protective packaging so it always arrives damage-free.',
+  },
+  {
+    icon: <Truck size={20} />,
+    title: 'Fast 3–5 Day Delivery',
+    desc: 'Printed, framed, and at your door in 3–5 working days across India.',
+  },
+  {
+    icon: <MapPin size={20} />,
+    title: 'Made in India',
+    desc: 'Proudly crafted by skilled Indian artisans who care about every detail.',
+  },
 ];
 
 export default async function HomePage() {
@@ -226,16 +259,34 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* CTA Banner */}
-      <section className="mx-4 sm:mx-6 mb-16 rounded-3xl bg-gradient-to-r from-[#C4634F] to-[#C9A84C] text-white p-10 text-center max-w-7xl xl:mx-auto">
-        <Gift size={40} className="mx-auto mb-4 opacity-80" />
-        <h2 className="text-2xl md:text-3xl font-bold mb-3">Ready to create something special?</h2>
-        <p className="text-white/80 mb-6 max-w-md mx-auto">
-          Upload a photo, customize in seconds, and make someone&apos;s day unforgettable.
-        </p>
-        <Button size="lg" className="bg-white text-[#C4634F] hover:bg-white/90 shadow-lg" asChild>
-          <Link href="/products">Create Your Frame <ArrowRight size={18} /></Link>
-        </Button>
+      {/* Why Choose Framio */}
+      <section className="bg-[#FDF8F4] py-16 px-4 sm:px-6">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-10">
+            <p className="text-[10px] font-bold text-[#C4634F] uppercase tracking-[0.2em] mb-2">
+              Our promise to you
+            </p>
+            <h2 className="text-2xl md:text-3xl font-bold text-[#2D1F1A]">Why Choose Framio</h2>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-5">
+            {WHY_FRAMIO.map(item => (
+              <div
+                key={item.title}
+                className="group bg-white rounded-2xl border border-[#E8DDD6] p-5 sm:p-6 flex flex-col gap-3 shadow-sm hover:shadow-md hover:border-[#C4634F]/30 hover:-translate-y-1 transition-all duration-200"
+              >
+                <div className="p-2.5 w-fit bg-[#F5EDE5] rounded-xl text-[#C4634F] group-hover:bg-[#C4634F] group-hover:text-white transition-all duration-200">
+                  {item.icon}
+                </div>
+                <div>
+                  <h3 className="font-bold text-[#2D1F1A] text-sm sm:text-base mb-1 leading-snug">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-[#7A6A64] leading-relaxed">{item.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
     </div>
   );
